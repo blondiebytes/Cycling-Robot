@@ -7,23 +7,26 @@
 #include <cstdlib>
 #include <cmath>
 #include <cfloat>
+#include <iostream>
 
 using namespace std;
 
 // TO DO: 
-// What is the problem with my enums?
-// How to move ball?
-// How to animate arm?
+// What is the problem with my enums? X
+// How to move ball? && How to animate arm?
+// How to make ball not jump into the arm?
 // How to ride the sphere, robot, and track? X
 // How to track the sphere, robot, and track? X
 // How to aim at the sphere, robot, and track? X
 // Implement forward and backwards direction X
 // Submenus for everything / UI X
+// Take out unnecssary code X
 
 #define PI 3.14159
 #define ORBIT_SLICES 360
 #define TRACK_RING 3.5
 #define BALL_RADIUS 0.1
+#define ROBOT_ROTATION_STEP .01
 
 #define RSTEP     5.00
 
@@ -32,11 +35,12 @@ using namespace std;
 #define EYE_STEP 0.1
 #define CEN_STEP 0.1
 #define ZOOM_FACTOR 8.0
+#define WITHIN_RANGE 45
 
 //Enumerated type and global variable for keeping track
 //of the selected operation.
 typedef enum {
-	POSITION, AIM, ORIENTATION, ZOOM, HOME, TIME, PROJECTION,
+	POSITION, AIM, ORIENTATION, ZOOM, HOME,
 	ANIMATE, NOTHING
 } operationType;
 operationType operation = POSITION;
@@ -50,21 +54,21 @@ trackingType tracking = NONE;
 trackingType riding = NONE;
 
 //Enumerated type and global variable for talking about axies.
-typedef enum { X, Y, Z } axisType;
-axisType axis = Z;
+typedef enum { XCAM, YCAM, ZCAM } cameraAxisType;
+cameraAxisType axisCam = ZCAM;
 
 //Enumerated type and global variable for talking about
 //direction of changes in camera position, and aim
 //and the direction of time steps and animation.
-typedef enum { DOWN, UP } directionType;
-directionType direction = UP;
+typedef enum { DOWNCAM, UPCAM } cameraDirectionType;
+cameraDirectionType directionCamera = UPCAM;
 
 typedef enum { SHOULDER, ELBOW, WRIST } jointType;
-typedef enum { X, Y, Z } axisType;
-typedef enum { DOWN, UP } directionType;
+typedef enum { X, Y, Z } robotAxisType;
+typedef enum { DOWN, UP } robotDirectionType;
 
-axisType axis = Z;
-directionType direction = UP;
+robotAxisType axisRobot = Z;
+robotDirectionType directionRobot = UP;
 jointType joint = SHOULDER;
 
 GLfloat shoulderX = 0, elbowX = 0, wristX = 0;
@@ -74,7 +78,8 @@ GLfloat shoulderZ = 0, elbowZ = 0, wristZ = 0;
 
 
 double robotRevolution = 0;
-double ballRevolution = 0;
+double ballRevolution = 180;
+bool pickingBall = false;
 
 GLUquadricObj *upperArm, *foreArm, *hand;
 
@@ -311,65 +316,25 @@ void homePosition() {
 	yUp = 1.0;
 	zUp = 0.0;
 
+	// Setting up the camera
+	axisCam = ZCAM;
+	directionCamera = UPCAM;
+	operation = POSITION;
+	tracking = NONE;
+	riding = NONE;
+	robotRevolution = 0;
+	ballRevolution = 180;
+
 	// Setting up Robot
-	axis = Z;
-	direction = UP;
+	axisRobot = Z;
+	directionRobot = UP;
 	joint = SHOULDER;
+	
 	shoulderX = 0; elbowX = 0; wristX = 0;
-	shoulderY = 270; elbowY = 0; wristY = 0;
+	shoulderY = 270; elbowY = 270; wristY = 270;
 	shoulderZ = 0; elbowZ = 0; wristZ = 0;
 
 }
-
-void operate()
-//Process the operation that the user has selected.
-{
-	if (operation == TIME) timeStep();
-	else if (operation == POSITION)
-		switch (axis)
-		{
-		case X:
-			if (direction == UP) xEye += EYE_STEP;
-			else xEye -= EYE_STEP;
-			break;
-		case Y:
-			if (direction == UP) yEye += EYE_STEP;
-			else yEye -= EYE_STEP;
-			break;
-		case Z:
-			if (direction == UP) zEye += EYE_STEP;
-			else zEye -= EYE_STEP;
-			break;
-		}
-	else if (operation == AIM)
-		switch (axis)
-		{
-		case X:
-			if (direction == UP) xCen += CEN_STEP;
-			else xCen -= CEN_STEP;
-			break;
-		case Y:
-			if (direction == UP) yCen += CEN_STEP;
-			else yCen -= CEN_STEP;
-			break;
-		case Z:
-			if (direction == UP) zCen += CEN_STEP;
-			else zCen -= CEN_STEP;
-			break;
-		}
-	else if (operation == ZOOM)
-	{
-		int sign;
-		if (direction == UP) sign = 1; else sign = -1;
-		xEye += sign * (xCen - xEye) / ZOOM_FACTOR;
-		yEye += sign * (yCen - yEye) / ZOOM_FACTOR;
-		zEye += sign * (zCen - zEye) / ZOOM_FACTOR;
-	}
-		glutPostRedisplay();
-}
-
-
-
 
 void getRobotPosition(GLdouble* x, GLdouble* y, GLdouble* z)
 //Finding the current position of the earth.
@@ -411,6 +376,111 @@ void ride()
 	}
 }
 
+void track()
+//Setting global variables that define an point at which the
+//camera is aimed.
+{
+	switch (tracking)
+	{
+	case ROBOT: getRobotPosition(&xCen, &yCen, &zCen); break;
+	case TRACK: getTrackPosition(&xCen, &yCen, &zCen); break;
+	case SPHERE: getBallPosition(&xCen, &yCen, &zCen); break;
+	default: break;
+	}
+}
+
+void startPickingUpBall() {
+	// 1. To pick up the ball, we must approach it and be in range -> done in wrapper
+	// 2. To get the ball to move with the hand, we must go to the wrist/hand coordinates
+	glPushMatrix();
+	gotoWristCoordinates();
+	// 3. Push on the ball coordinates
+	goToBall();
+	// 4. rotate the wrist, which will in turn move the ball
+	// ????
+	gotoWristCoordinates();
+	glRotatef(90, 0, 1, 0);
+	// 5. Unlock the ball
+	pickingBall = false;
+	glPopMatrix();
+	
+}
+
+void timeStep() {
+ if (!pickingBall) {
+	if (directionRobot == UP)
+	{
+		// When should we pick up ball
+		if (abs(robotRevolution - ballRevolution) <= WITHIN_RANGE && !pickingBall) {
+		//	ballRevolution = robotRevolution - WITHIN_RANGE - 2;
+			pickingBall = true;
+			startPickingUpBall();
+		}
+		else {
+			robotRevolution += ROBOT_ROTATION_STEP;
+		}
+		//cout << WITHIN_RANGE << " : " << robotRevolution - ballRevolution << " : " << ballRevolution << " : " << robotRevolution << endl;
+	}
+	else {
+		if (abs(robotRevolution - ballRevolution) <= WITHIN_RANGE && !pickingBall) {
+			//ballRevolution = robotRevolution - WITHIN_RANGE - 2;
+			pickingBall = true;
+			startPickingUpBall();
+		}
+		else {
+			robotRevolution -= ROBOT_ROTATION_STEP;
+		}
+		}
+	}
+	track();
+	ride();
+	glutPostRedisplay();
+}
+
+void operate()
+//Process the operation that the user has selected.
+{
+	if (operation == POSITION)
+		switch (axisCam)
+		{
+		case X:
+			if (directionCamera == UPCAM) xEye += EYE_STEP;
+			else xEye -= EYE_STEP;
+			break;
+		case Y:
+			if (directionCamera == UPCAM) yEye += EYE_STEP;
+			else yEye -= EYE_STEP;
+			break;
+		case Z:
+			if (directionCamera == UPCAM) zEye += EYE_STEP;
+			else zEye -= EYE_STEP;
+			break;
+		}
+	else if (operation == AIM)
+		switch (axisCam)
+		{
+		case X:
+			if (directionCamera == UPCAM) xCen += CEN_STEP;
+			else xCen -= CEN_STEP;
+			break;
+		case Y:
+			if (directionCamera == UPCAM) yCen += CEN_STEP;
+			else yCen -= CEN_STEP;
+			break;
+		case Z:
+			if (directionCamera == UPCAM) zCen += CEN_STEP;
+			else zCen -= CEN_STEP;
+			break;
+		}
+		glutPostRedisplay();
+}
+
+
+
+
+
+
+
 
 void rideSubMenu(int item)
 // Callback for processing camera set ride submenu.
@@ -424,18 +494,7 @@ void rideSubMenu(int item)
 	glutPostRedisplay();
 }
 
-void track()
-//Setting global variables that define an point at which the
-//camera is aimed.
-{
-	switch (tracking)
-	{
-	case ROBOT: getRobotPosition(&xCen, &yCen, &zCen); break;
-	case TRACK: getTrackPosition(&xCen, &yCen, &zCen); break;
-	case SPHERE: getBallPosition(&xCen, &yCen, &zCen); break;
-	default: break;
-	}
-}
+
 
 
 void trackSubMenu(int item)
@@ -457,9 +516,9 @@ void aimSubMenu(int item)
 	tracking = NONE;
 	switch (item)
 	{
-	case 1: axis = X; break;
-	case 2: axis = Y; break;
-	case 3: axis = Z; break;
+	case 1: axisCam = XCAM; break;
+	case 2: axisCam = YCAM; break;
+	case 3: axisCam = ZCAM; break;
 	}
 }
 
@@ -470,9 +529,9 @@ void positionSubMenu(int item)
 	riding = NONE;
 	switch (item)
 	{
-	case 1: axis = X; break;
-	case 2: axis = Y; break;
-	case 3: axis = Z; break;
+	case 1: axisCam = XCAM; break;
+	case 2: axisCam = YCAM; break;
+	case 3: axisCam = ZCAM; break;
 	}
 }
 
@@ -497,8 +556,8 @@ void animateSubMenu(int item)
 	glutIdleFunc(timeStep);
 	switch (item)
 	{
-	case 1: direction = UP; break;
-	case 2: direction = DOWN; break;
+	case 1: directionRobot = UP; break;
+	case 2: directionRobot = DOWN; break;
 	}
 }
 
@@ -507,43 +566,18 @@ void axisSubMenu(int item)
 {
 	switch (item)
 	{
-	case 1: axis = X; break;
-	case 2: axis = Y; break;
-	case 3: axis = Z; break;
+	case 1: axisCam = XCAM; break;
+	case 2: axisCam = YCAM; break;
+	case 3: axisCam = ZCAM; break;
 	}
-}
-
-void timeStep() {
-
-	if (direction == UP)
-	{
-		if (robotRevolution != ORBIT_SLICES) {
-			robotRevolution = robotRevolution + 0.01;
-		}
-		else {
-			robotRevolution = 0;
-		}
-	}
-	else
-	{
-		if (robotRevolution != 0) {
-			robotRevolution = robotRevolution - 0.01;
-		}
-		else {
-			robotRevolution = 360;
-		}
-	}
-	track();
-	ride();
-	glutPostRedisplay();
 }
 
 void keyboard(unsigned char key, int, int)
 //Function to support keyboard control of some operations.
 {
 	switch (key) {
-	case 't': direction = DOWN; timeStep(); break;
-	case 'T': direction = UP; timeStep(); break;
+	case 't': directionRobot = DOWN; timeStep(); break;
+	case 'T': directionRobot = UP; timeStep(); break;
 	case 'x':
 		xEye -= EYE_STEP;
 		glutPostRedisplay();
@@ -605,9 +639,6 @@ void mainMenu(int item)
 {
 	switch (item)
 	{
-	case 0: operation = ZOOM; break;
-	case 1: operation = TIME; break;
-	case 2: operation = PROJECTION; break;
 	case 3: homePosition();glutPostRedisplay(); break;
 	case 4: std::exit(0);
 	}
@@ -630,6 +661,11 @@ void setMenus()
 	glutAddMenuEntry("Track", 2);
 	glutAddMenuEntry("Ball", 3);
 
+	aimSubMenuCode = glutCreateMenu(aimSubMenu);
+	glutAddMenuEntry("X Axis", 1);
+	glutAddMenuEntry("Y Axis", 2);
+	glutAddMenuEntry("Z Axis", 3);
+
 	positionSubMenuCode = glutCreateMenu(positionSubMenu);
 	glutAddMenuEntry("X Axis", 1);
 	glutAddMenuEntry("Y Axis", 2);
@@ -651,9 +687,6 @@ void setMenus()
 	glutAddSubMenu("Change Camera Position ...", positionSubMenuCode);
 	glutAddSubMenu("Change Camera Orientation ...", orientationSubMenuCode);
 	glutAddSubMenu("Animate ...", animateSubMenuCode);
-	glutAddMenuEntry("Zoom", 0);
-	glutAddMenuEntry("Step", 1);
-	glutAddMenuEntry("Change Projection", 2);
 	glutAddMenuEntry("Home Position", 3);
 	glutAddMenuEntry("Exit", 4);
 	glutAttachMenu(GLUT_MIDDLE_BUTTON);
@@ -670,13 +703,13 @@ void mouse(int button, int state, int, int)
 	if (button == GLUT_LEFT_BUTTON)
 		switch (state)
 		{
-		case GLUT_DOWN: direction = DOWN; operate(); break;
+		case GLUT_DOWN: directionCamera = DOWNCAM; operate(); break;
 		case GLUT_UP: break;
 		}
 	else if (button == GLUT_RIGHT_BUTTON)
 		switch (state)
 		{
-		case GLUT_DOWN: direction = UP; operate(); break;
+		case GLUT_DOWN: directionCamera = UPCAM; operate(); break;
 		case GLUT_UP: break;
 		}
 }
