@@ -10,12 +10,54 @@
 
 using namespace std;
 
+// TO DO: 
+// What is the problem with my enums?
+// How to move ball?
+// How to animate arm?
+// How to ride the sphere, robot, and track? X
+// How to track the sphere, robot, and track? X
+// How to aim at the sphere, robot, and track? X
+// Implement forward and backwards direction X
+// Submenus for everything / UI X
+
 #define PI 3.14159
 #define ORBIT_SLICES 360
-#define TRACK_RING 10
+#define TRACK_RING 3.5
 #define BALL_RADIUS 0.1
 
 #define RSTEP     5.00
+
+//Constants defining the step increments for changing
+//the location and the aim of the camera.
+#define EYE_STEP 0.1
+#define CEN_STEP 0.1
+#define ZOOM_FACTOR 8.0
+
+//Enumerated type and global variable for keeping track
+//of the selected operation.
+typedef enum {
+	POSITION, AIM, ORIENTATION, ZOOM, HOME, TIME, PROJECTION,
+	ANIMATE, NOTHING
+} operationType;
+operationType operation = POSITION;
+
+
+//Enumerated type and global variable for keeping track
+//of the object the user has selected to track with the camera
+//and the object the user has selected for the camera to ride.
+typedef enum { ROBOT, TRACK, SPHERE,NONE } trackingType;
+trackingType tracking = NONE;
+trackingType riding = NONE;
+
+//Enumerated type and global variable for talking about axies.
+typedef enum { X, Y, Z } axisType;
+axisType axis = Z;
+
+//Enumerated type and global variable for talking about
+//direction of changes in camera position, and aim
+//and the direction of time steps and animation.
+typedef enum { DOWN, UP } directionType;
+directionType direction = UP;
 
 typedef enum { SHOULDER, ELBOW, WRIST } jointType;
 typedef enum { X, Y, Z } axisType;
@@ -26,10 +68,13 @@ directionType direction = UP;
 jointType joint = SHOULDER;
 
 GLfloat shoulderX = 0, elbowX = 0, wristX = 0;
-GLfloat shoulderY = 0, elbowY = 0, wristY = 0;
+GLfloat shoulderY = 270, elbowY = 0, wristY = 0;
 GLfloat shoulderZ = 0, elbowZ = 0, wristZ = 0;
 
-int robotRevolution = 0;
+
+
+double robotRevolution = 0;
+double ballRevolution = 0;
 
 GLUquadricObj *upperArm, *foreArm, *hand;
 
@@ -48,6 +93,8 @@ GLdouble xUp = 0.0;
 GLdouble yUp = 1.0;
 GLdouble zUp = 0.0;
 
+
+
 int windowHeight, windowWidth;
 
 
@@ -57,6 +104,34 @@ void init()
 {
 	glClearColor(0.0, 0.0, 0.0, 0.0);
 	glShadeModel(GL_FLAT);
+}
+
+
+void multiplyMatrixVector(GLdouble* m, GLdouble* v, GLdouble* w, int size)
+//Multiplying a vector by a matrix.
+{
+	int i, j;
+	for (i = 0; i<size; i++)
+	{
+		GLdouble temp = 0.0;
+		for (j = 0; j<size; j++)
+			temp += (*(m + i + j*size)) * (*(v + j));
+		*(w + i) = temp;
+	}
+}
+
+void getCurrentLocation(GLdouble* x, GLdouble* y, GLdouble* z)
+//Finding the location in world coordinates to which the current
+//modelview matrix maps the origin.
+{
+	GLdouble modelviewMatrix[16];
+	GLdouble v[4] = { 0.0,0.0,0.0,1.0 };
+	GLdouble w[4];
+	glGetDoublev(GL_MODELVIEW_MATRIX, modelviewMatrix);
+	multiplyMatrixVector(modelviewMatrix, v, w, 4);
+	*x = w[0] / w[3];
+	*y = w[1] / w[3];
+	*z = w[2] / w[3];
 }
 
 void drawCircle(GLdouble radius)
@@ -75,7 +150,6 @@ void drawTrack() { // Not showing up
 	glColor3f(0.0, 0.0, 1.0);
 	drawCircle(TRACK_RING);
 }
-
 // -- DRAWING ROBOT ARM --
 
 void gotoShoulderCoordinates()
@@ -141,14 +215,10 @@ void drawRobotArm()
 }
 
 void drawPlatform() {
-	glColor3f(0.0, 1.0, 0.0);
+	glColor3f(0.0, 1.0, 1.0);
 	glPushMatrix();
-	for (int i = 0; i < 50; i++) {
-		for (int j = 0; j < 50; j++) {
-		  //  glutSolidCube();
-
-		}
-	}
+	glTranslatef(-0.1, 0.1, 0);
+	glutWireCube(0.8);
 	glPopMatrix();
 }
 
@@ -169,7 +239,15 @@ void drawRobot() { // Causes the program to crash
 
 // -- DRAWING BALL --
 
+void goToBall() {
+	// rotate to where the robot is on the track
+	glRotatef((GLdouble)ballRevolution, 0.0, 0.0, 1.0);
+	// translate out to it
+	glTranslatef(TRACK_RING, 0.0, 0.0);
+}
+
 void drawBall() {
+	goToBall();
 	glutSolidSphere(BALL_RADIUS, 10, 8);
 }
 
@@ -225,7 +303,7 @@ void homePosition() {
 	// Setting up view
 	xEye = 0.0;
 	yEye = 0.0;
-	zEye = 5.0;
+	zEye = 10.0;
 	xCen = 0.0;
 	yCen = 0.0;
 	zCen = 0.0;
@@ -238,14 +316,369 @@ void homePosition() {
 	direction = UP;
 	joint = SHOULDER;
 	shoulderX = 0; elbowX = 0; wristX = 0;
-	shoulderY = 0; elbowY = 0; wristY = 0;
+	shoulderY = 270; elbowY = 0; wristY = 0;
 	shoulderZ = 0; elbowZ = 0; wristZ = 0;
 
 }
 
-void timeStep() {
-	robotRevolution = (robotRevolution + 1) % ORBIT_SLICES;
+void operate()
+//Process the operation that the user has selected.
+{
+	if (operation == TIME) timeStep();
+	else if (operation == POSITION)
+		switch (axis)
+		{
+		case X:
+			if (direction == UP) xEye += EYE_STEP;
+			else xEye -= EYE_STEP;
+			break;
+		case Y:
+			if (direction == UP) yEye += EYE_STEP;
+			else yEye -= EYE_STEP;
+			break;
+		case Z:
+			if (direction == UP) zEye += EYE_STEP;
+			else zEye -= EYE_STEP;
+			break;
+		}
+	else if (operation == AIM)
+		switch (axis)
+		{
+		case X:
+			if (direction == UP) xCen += CEN_STEP;
+			else xCen -= CEN_STEP;
+			break;
+		case Y:
+			if (direction == UP) yCen += CEN_STEP;
+			else yCen -= CEN_STEP;
+			break;
+		case Z:
+			if (direction == UP) zCen += CEN_STEP;
+			else zCen -= CEN_STEP;
+			break;
+		}
+	else if (operation == ZOOM)
+	{
+		int sign;
+		if (direction == UP) sign = 1; else sign = -1;
+		xEye += sign * (xCen - xEye) / ZOOM_FACTOR;
+		yEye += sign * (yCen - yEye) / ZOOM_FACTOR;
+		zEye += sign * (zCen - zEye) / ZOOM_FACTOR;
+	}
+		glutPostRedisplay();
+}
+
+
+
+
+void getRobotPosition(GLdouble* x, GLdouble* y, GLdouble* z)
+//Finding the current position of the earth.
+{
+	glMatrixMode(GL_MODELVIEW);
+	glPushMatrix();
+	glLoadIdentity();
+	goToRobot();
+	getCurrentLocation(x, y, z);
+	glPopMatrix();
+}
+
+void getTrackPosition(GLdouble* x, GLdouble* y, GLdouble* z) {
+	glMatrixMode(GL_MODELVIEW);
+	glPushMatrix();
+	glLoadIdentity();
+	getCurrentLocation(x, y, z);
+	glPopMatrix();
+}
+
+void getBallPosition(GLdouble* x, GLdouble* y, GLdouble* z) {
+	glMatrixMode(GL_MODELVIEW);
+	glPushMatrix();
+	glLoadIdentity();
+	goToBall();
+	getCurrentLocation(x, y, z);
+	glPopMatrix();
+}
+
+void ride()
+//Setting global variables that define the location of the camera.
+{
+	switch (riding)
+	{
+	case ROBOT: getRobotPosition(&xEye, &yEye, &zEye); break;
+	case TRACK: getTrackPosition(&xEye, &yEye, &zEye); break;
+	case SPHERE: getBallPosition(&xEye, &yEye, &zEye); break;
+	default: break;
+	}
+}
+
+
+void rideSubMenu(int item)
+// Callback for processing camera set ride submenu.
+{
+	switch (item)
+	{
+	case 1: riding = ROBOT; ride(); break;
+	case 2: riding = TRACK; ride(); break;
+	case 3: riding = SPHERE; ride(); break;
+	}
 	glutPostRedisplay();
+}
+
+void track()
+//Setting global variables that define an point at which the
+//camera is aimed.
+{
+	switch (tracking)
+	{
+	case ROBOT: getRobotPosition(&xCen, &yCen, &zCen); break;
+	case TRACK: getTrackPosition(&xCen, &yCen, &zCen); break;
+	case SPHERE: getBallPosition(&xCen, &yCen, &zCen); break;
+	default: break;
+	}
+}
+
+
+void trackSubMenu(int item)
+// Callback for processing camera set aim submenu.
+{
+	switch (item)
+	{
+	case 1: tracking = ROBOT; track(); break;
+	case 2: tracking = TRACK; track(); break;
+	case 3: tracking = SPHERE; track(); break;
+	}
+	glutPostRedisplay();
+}
+
+void aimSubMenu(int item)
+// Callback for processing camera change aim submenu.
+{
+	operation = AIM;
+	tracking = NONE;
+	switch (item)
+	{
+	case 1: axis = X; break;
+	case 2: axis = Y; break;
+	case 3: axis = Z; break;
+	}
+}
+
+void positionSubMenu(int item)
+// Callback for processing camera position submenu.
+{
+	operation = POSITION;
+	riding = NONE;
+	switch (item)
+	{
+	case 1: axis = X; break;
+	case 2: axis = Y; break;
+	case 3: axis = Z; break;
+	}
+}
+
+
+void orientationSubMenu(int item)
+// Callback for processing camera orientation submenu.
+{
+	switch (item)
+	{
+	case 1: {xUp = 1.0; yUp = 0.0; zUp = 0.0; break; }
+	case 2: {xUp = 0.0; yUp = 1.0; zUp = 0.0; break; }
+	case 3: {xUp = 0.0; yUp = 0.0; zUp = 1.0; break; }
+	}
+	glutPostRedisplay();
+}
+
+
+void animateSubMenu(int item)
+// Callback for processing animate submenu.
+{
+	operation = ANIMATE;
+	glutIdleFunc(timeStep);
+	switch (item)
+	{
+	case 1: direction = UP; break;
+	case 2: direction = DOWN; break;
+	}
+}
+
+void axisSubMenu(int item)
+// Callback for processing axis submenu.
+{
+	switch (item)
+	{
+	case 1: axis = X; break;
+	case 2: axis = Y; break;
+	case 3: axis = Z; break;
+	}
+}
+
+void timeStep() {
+
+	if (direction == UP)
+	{
+		if (robotRevolution != ORBIT_SLICES) {
+			robotRevolution = robotRevolution + 0.01;
+		}
+		else {
+			robotRevolution = 0;
+		}
+	}
+	else
+	{
+		if (robotRevolution != 0) {
+			robotRevolution = robotRevolution - 0.01;
+		}
+		else {
+			robotRevolution = 360;
+		}
+	}
+	track();
+	ride();
+	glutPostRedisplay();
+}
+
+void keyboard(unsigned char key, int, int)
+//Function to support keyboard control of some operations.
+{
+	switch (key) {
+	case 't': direction = DOWN; timeStep(); break;
+	case 'T': direction = UP; timeStep(); break;
+	case 'x':
+		xEye -= EYE_STEP;
+		glutPostRedisplay();
+		break;
+	case 'X':
+		xEye += EYE_STEP;
+		glutPostRedisplay();
+		break;
+	case 'y':
+		yEye -= EYE_STEP;
+		glutPostRedisplay();
+		break;
+	case 'Y':
+		yEye += EYE_STEP;
+		glutPostRedisplay();
+		break;
+	case 'z':
+		zEye -= EYE_STEP;
+		glutPostRedisplay();
+		break;
+	case 'Z':
+		zEye += EYE_STEP;
+		glutPostRedisplay();
+		break;
+	case 'a':
+		xCen -= CEN_STEP;
+		glutPostRedisplay();
+		break;
+	case 'A':
+		xCen += CEN_STEP;
+		glutPostRedisplay();
+		break;
+	case 'b':
+		yCen -= CEN_STEP;
+		glutPostRedisplay();
+		break;
+	case 'B':
+		yCen += CEN_STEP;
+		glutPostRedisplay();
+		break;
+	case 'c':
+		zCen -= CEN_STEP;
+		glutPostRedisplay();
+		break;
+	case 'C':
+		zCen += CEN_STEP;
+		glutPostRedisplay();
+		break;
+	case 27:
+		std::exit(0);
+		break;
+	default:
+		break;
+	}
+}
+
+void mainMenu(int item)
+// Callback for processing main menu.
+{
+	switch (item)
+	{
+	case 0: operation = ZOOM; break;
+	case 1: operation = TIME; break;
+	case 2: operation = PROJECTION; break;
+	case 3: homePosition();glutPostRedisplay(); break;
+	case 4: std::exit(0);
+	}
+}
+
+void setMenus()
+// Routine for creating menus.
+{
+	int trackSubMenuCode, rideSubMenuCode;
+	int aimSubMenuCode, positionSubMenuCode, orientationSubMenuCode;
+	int animateSubMenuCode;
+
+	trackSubMenuCode = glutCreateMenu(trackSubMenu);
+	glutAddMenuEntry("Robot", 1);
+	glutAddMenuEntry("Track", 2);
+	glutAddMenuEntry("Ball", 3);
+
+	rideSubMenuCode = glutCreateMenu(rideSubMenu);
+	glutAddMenuEntry("Robot", 1);
+	glutAddMenuEntry("Track", 2);
+	glutAddMenuEntry("Ball", 3);
+
+	positionSubMenuCode = glutCreateMenu(positionSubMenu);
+	glutAddMenuEntry("X Axis", 1);
+	glutAddMenuEntry("Y Axis", 2);
+	glutAddMenuEntry("Z Axis", 3);
+
+	orientationSubMenuCode = glutCreateMenu(orientationSubMenu);
+	glutAddMenuEntry("X Axis", 1);
+	glutAddMenuEntry("Y Axis", 2);
+	glutAddMenuEntry("Z Axis", 3);
+
+	animateSubMenuCode = glutCreateMenu(animateSubMenu);
+	glutAddMenuEntry("Forward", 1);
+	glutAddMenuEntry("Backward", 2);
+
+	glutCreateMenu(mainMenu);
+	glutAddSubMenu("Set Body Tracking  ...", trackSubMenuCode);
+	glutAddSubMenu("Set Body Riding  ...", rideSubMenuCode);
+	glutAddSubMenu("Change Camera Aim ...", aimSubMenuCode);
+	glutAddSubMenu("Change Camera Position ...", positionSubMenuCode);
+	glutAddSubMenu("Change Camera Orientation ...", orientationSubMenuCode);
+	glutAddSubMenu("Animate ...", animateSubMenuCode);
+	glutAddMenuEntry("Zoom", 0);
+	glutAddMenuEntry("Step", 1);
+	glutAddMenuEntry("Change Projection", 2);
+	glutAddMenuEntry("Home Position", 3);
+	glutAddMenuEntry("Exit", 4);
+	glutAttachMenu(GLUT_MIDDLE_BUTTON);
+}
+
+
+void mouse(int button, int state, int, int)
+// Routine for processing mouse events.
+{
+	if (operation == ANIMATE)
+	{
+		glutIdleFunc(NULL); operation = NOTHING; return;
+	}
+	if (button == GLUT_LEFT_BUTTON)
+		switch (state)
+		{
+		case GLUT_DOWN: direction = DOWN; operate(); break;
+		case GLUT_UP: break;
+		}
+	else if (button == GLUT_RIGHT_BUTTON)
+		switch (state)
+		{
+		case GLUT_DOWN: direction = UP; operate(); break;
+		case GLUT_UP: break;
+		}
 }
 
 int main(int argc, char** argv)
@@ -261,12 +694,12 @@ int main(int argc, char** argv)
 	init();
 	glutDisplayFunc(display);
 	glutReshapeFunc(reshape);
-	//glutKeyboardFunc(keyboard);
-	//glutMouseFunc(mouse);
+	glutKeyboardFunc(keyboard);
+	glutMouseFunc(mouse);
 	glEnable(GL_DEPTH_TEST);
 	glutIdleFunc(timeStep);
 
-	//setMenus();
+	setMenus();
 	homePosition();
 
 	upperArm = gluNewQuadric();
