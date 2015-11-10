@@ -14,7 +14,8 @@ using namespace std;
 // TO DO: 
 // What is the problem with my enums? X
 // How to move ball?
-// Condition for the arm?
+// Moving arm backward
+// Condition for the arm? X
 // How to animate arm? X
 // How to make ball not jump into the arm?
 // How to ride the sphere, robot, and track? X
@@ -254,11 +255,54 @@ void goToBall() {
 	glRotatef((GLdouble)ballRevolution, 0.0, 0.0, 1.0);
 	// translate out to it
 	glTranslatef(TRACK_RING, 0.0, 0.0);
+	// SAVE in TOB Variable !!!
+}
+
+
+void computeTHB() {
+	glPushMatrix();
+	// 1. Set the model view matrix to the identity matrix
+	glLoadIdentity();
+	gotoWristCoordinates();
+	gotoElbowCoordinates();
+	gotoShoulderCoordinates();
+	// SAVE THB =  this.modelViewMatrix.muptiple(computeTHB ()); !!!
+	glPopMatrix();
+
 }
 
 void drawBall() {
-	goToBall();
-	glutSolidSphere(BALL_RADIUS, 10, 8);
+	// SWITCH STATEMENT BASED ON STATE
+	switch (currentState) {
+	case TRAVELING: // use TOB to draw the ball in relation to the origin
+		goToBall(); // <-- computes TOB
+		glutSolidSphere(BALL_RADIUS, 10, 8);
+		break;
+	case REACHING: // compute THB and then mutiply the model view matrixd by TOB. Save it in THB
+		computeTHB();
+		// multiply by TOB
+		// save it into THB
+
+		// but for now...
+		goToBall();
+		glutSolidSphere(BALL_RADIUS, 10, 8);
+		break;
+	case CARRYING: // use THB to draw the ball in relation to the robot's hand
+		computeTHB();
+		// but for now..
+		//goToBall();
+		glutSolidSphere(BALL_RADIUS, 10, 8);
+		break;
+	case RETRACTING: break;
+		// load identity
+		// go from origin to hand
+		// multiply the model view matrix by Thb
+		// save it in TOB
+
+		// but for now...
+		goToBall();
+		glutSolidSphere(BALL_RADIUS, 10, 8);
+	}
 }
 
 // -- DRAWING EVERYTHING --
@@ -397,21 +441,6 @@ void track()
 	}
 }
 
-void startPickingUpBall() {
-	// 1. To pick up the ball, we must approach it and be in range -> done in wrapper
-	// 2. To get the ball to move with the hand, we must go to the wrist/hand coordinates
-	glPushMatrix();
-	gotoWristCoordinates();
-	// 3. Push on the ball coordinates
-	goToBall();
-	// 4. rotate the wrist, which will in turn move the ball
-	// ????
-	gotoWristCoordinates();
-	glRotatef(90, 0, 1, 0);
-	// 5. Unlock the ball
-	glPopMatrix();
-	
-}
 
 
 void timeStep() {
@@ -509,6 +538,8 @@ void timeStep() {
 				shoulderY += .01;
 				changeDirection = false;
 			}
+			// Move the ball as well
+			computeTHB();
 			if (changeDirection) {
 				// put down ball
 				ballRevolution = robotRevolution - (WITHIN_RANGE - 12);
@@ -534,6 +565,7 @@ void timeStep() {
 				changeDirection = false;
 			}
 			if (changeDirection) {
+
 				// put down ball
 				ballRevolution = robotRevolution - (WITHIN_RANGE - 12);
 				currentState = RETRACTING;
