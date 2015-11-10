@@ -13,7 +13,9 @@ using namespace std;
 
 // TO DO: 
 // What is the problem with my enums? X
-// How to move ball? && How to animate arm?
+// How to move ball?
+// Condition for the arm?
+// How to animate arm? X
 // How to make ball not jump into the arm?
 // How to ride the sphere, robot, and track? X
 // How to track the sphere, robot, and track? X
@@ -35,7 +37,7 @@ using namespace std;
 #define EYE_STEP 0.1
 #define CEN_STEP 0.1
 #define ZOOM_FACTOR 8.0
-#define WITHIN_RANGE 45
+#define WITHIN_RANGE 40
 
 //Enumerated type and global variable for keeping track
 //of the selected operation.
@@ -66,6 +68,8 @@ cameraDirectionType directionCamera = UPCAM;
 typedef enum { SHOULDER, ELBOW, WRIST } jointType;
 typedef enum { X, Y, Z } robotAxisType;
 typedef enum { DOWN, UP } robotDirectionType;
+typedef enum { TRAVELING, REACHING, CARRYING, RETRACTING} robotState;
+robotState currentState = TRAVELING;
 
 robotAxisType axisRobot = Z;
 robotDirectionType directionRobot = UP;
@@ -79,7 +83,8 @@ GLfloat shoulderZ = 0, elbowZ = 0, wristZ = 0;
 
 double robotRevolution = 0;
 double ballRevolution = 180;
-bool pickingBall = false;
+bool alreadyPickedUpBall = false;
+int certainStepsAway = 0;
 
 GLUquadricObj *upperArm, *foreArm, *hand;
 
@@ -168,14 +173,14 @@ void drawUpperArm()
 {
 	glPushMatrix();
 	glColor3f(1.0, 0.0, 0.0);
-	glRotatef((GLfloat)90, 0.0, 1.0, 0.0);
+	//glRotatef((GLfloat)90, 0.0, 1.0, 0.0);
 	gluCylinder(upperArm, 0.1, 0.1, 1.0, 8, 1);
 	glPopMatrix();
 }
 
 void gotoElbowCoordinates()
 {
-	glTranslatef(1.0, 0.0, 0.0);
+	glTranslatef(0.0, 0.0, 1.0);
 	glRotatef((GLfloat)elbowX, 1.0, 0.0, 0.0);
 	glRotatef((GLfloat)elbowY, 0.0, 1.0, 0.0);
 	glRotatef((GLfloat)elbowZ, 0.0, 0.0, 1.0);
@@ -185,14 +190,14 @@ void drawForeArm()
 {
 	glPushMatrix();
 	glColor3f(0.0, 1.0, 0.0);
-	glRotatef((GLfloat)90, 0.0, 1.0, 0.0);
+	//glRotatef((GLfloat)90, 0.0, 1.0, 0.0);
 	gluCylinder(foreArm, 0.1, 0.1, 1.0, 8, 1);
 	glPopMatrix();
 }
 
 void gotoWristCoordinates()
 {
-	glTranslatef(1.0, 0.0, 0.0);
+	glTranslatef(0.0, 0.0, 1.0);
 	glRotatef((GLfloat)wristX, 1.0, 0.0, 0.0);
 	glRotatef((GLfloat)wristY, 0.0, 1.0, 0.0);
 	glRotatef((GLfloat)wristZ, 0.0, 0.0, 1.0);
@@ -202,7 +207,7 @@ void drawHand()
 {
 	glPushMatrix();
 	glColor3f(1.0, 1.0, 0.0);
-	glRotatef((GLfloat)90, 0.0, 1.0, 0.0);
+	//glRotatef((GLfloat)90, 0.0, 1.0, 0.0);
 	gluCylinder(hand, 0.1, 0.1, 1.0, 8, 1);
 	glPopMatrix();
 }
@@ -331,8 +336,11 @@ void homePosition() {
 	joint = SHOULDER;
 	
 	shoulderX = 0; elbowX = 0; wristX = 0;
-	shoulderY = 270; elbowY = 270; wristY = 270;
+	shoulderY = 0; elbowY = 0; wristY = 0;
 	shoulderZ = 0; elbowZ = 0; wristZ = 0;
+
+	currentState = TRAVELING;
+	certainStepsAway = 0;
 
 }
 
@@ -401,37 +409,188 @@ void startPickingUpBall() {
 	gotoWristCoordinates();
 	glRotatef(90, 0, 1, 0);
 	// 5. Unlock the ball
-	pickingBall = false;
 	glPopMatrix();
 	
 }
 
+
 void timeStep() {
- if (!pickingBall) {
-	if (directionRobot == UP)
-	{
-		// When should we pick up ball
-		if (abs(robotRevolution - ballRevolution) <= WITHIN_RANGE && !pickingBall) {
-		//	ballRevolution = robotRevolution - WITHIN_RANGE - 2;
-			pickingBall = true;
-			startPickingUpBall();
+	switch (currentState) {
+	case TRAVELING:
+		if (directionRobot == UP) {
+			if (abs(fmod(ballRevolution, 360.0) - fmod(robotRevolution,360.0)) <= WITHIN_RANGE && !alreadyPickedUpBall) {
+				currentState = REACHING;
+				certainStepsAway = 0;
+			}
+			else {
+				if (certainStepsAway >= 2000) {
+					alreadyPickedUpBall = false;
+				}
+				robotRevolution += ROBOT_ROTATION_STEP;
+				certainStepsAway++;
+			}
 		}
 		else {
-			robotRevolution += ROBOT_ROTATION_STEP;
+			if (abs(fmod(ballRevolution, 360.0) + fmod(robotRevolution, 360.0)) <= WITHIN_RANGE && !alreadyPickedUpBall) {
+				currentState = REACHING;
+				certainStepsAway = 0;
+			}
+			else {
+				if (certainStepsAway >= 2000) {
+					alreadyPickedUpBall = false;
+				}
+				robotRevolution -= ROBOT_ROTATION_STEP;
+				certainStepsAway++;
+			}
 		}
-		//cout << WITHIN_RANGE << " : " << robotRevolution - ballRevolution << " : " << ballRevolution << " : " << robotRevolution << endl;
-	}
-	else {
-		if (abs(robotRevolution - ballRevolution) <= WITHIN_RANGE && !pickingBall) {
-			//ballRevolution = robotRevolution - WITHIN_RANGE - 2;
-			pickingBall = true;
-			startPickingUpBall();
+		break;
+	case REACHING:
+		if (directionRobot == UP) {
+			bool changeDirection = true;
+			if (shoulderX >= -45) {
+				shoulderX -= .01;
+				changeDirection = false;
+			}
+			if (elbowX >= -45) {
+				elbowX -= .01;
+				changeDirection = false;
+			}
+			if (wristX >= -45) {
+				wristX -= .01;
+				changeDirection = false;
+			}
+			if (shoulderY >= -27) {
+				shoulderY -= .01;
+				changeDirection = false;
+			}
+			if (changeDirection) {
+				currentState = CARRYING;
+			}
 		}
 		else {
-			robotRevolution -= ROBOT_ROTATION_STEP;
+			bool changeDirection = true;
+			if (shoulderX <= 45) {
+				shoulderX += .01;
+				changeDirection = false;
+			}
+			if (elbowX <= 45) {
+				elbowX += .01;
+				changeDirection = false;
+			}
+			if (wristX <= 45) {
+				wristX += .01;
+				changeDirection = false;
+			}
+			if (shoulderY <= 27) {
+				shoulderY += .01;
+				changeDirection = false;
+			}
+			if (changeDirection) {
+				currentState = CARRYING;
+			}
 		}
+		break;
+	case CARRYING:
+		if (directionRobot = UP) {
+			bool changeDirection = true;
+			if (shoulderX <= 60) {
+				shoulderX += .01;
+				changeDirection = false;
+			}
+			if (elbowX <= 60) {
+				elbowX += .01;
+				changeDirection = false;
+			}
+			if (wristX <= 60) {
+				wristX += .01;
+				changeDirection = false;
+			}
+			if (shoulderY <= 0) {
+				shoulderY += .01;
+				changeDirection = false;
+			}
+			if (changeDirection) {
+				// put down ball
+				ballRevolution = robotRevolution - (WITHIN_RANGE - 12);
+				currentState = RETRACTING;
+			}
 		}
+		else {
+			bool changeDirection = true;
+			if (shoulderX >= -60) {
+				shoulderX -= .01;
+				changeDirection = false;
+			}
+			if (elbowX >= -60) {
+				elbowX -= .01;
+				changeDirection = false;
+			}
+			if (wristX >= -60) {
+				wristX -= .01;
+				changeDirection = false;
+			}
+			if (shoulderY >= 0) {
+				shoulderY -= .01;
+				changeDirection = false;
+			}
+			if (changeDirection) {
+				// put down ball
+				ballRevolution = robotRevolution - (WITHIN_RANGE - 12);
+				currentState = RETRACTING;
+			}
+		}
+		break;
+	case RETRACTING:
+		alreadyPickedUpBall = true;
+		if (directionRobot == UP) {
+			bool changeDirection = true;
+			if (shoulderX >= 0) {
+				shoulderX -= .01;
+				changeDirection = false;
+			}
+			if (elbowX >= 0) {
+				elbowX -= .01;
+				changeDirection = false;
+			}
+			if (wristX >= 0) {
+				wristX -= .01;
+				changeDirection = false;
+			}
+			if (shoulderY >= 0) {
+				shoulderY -= .01;
+				changeDirection = false;
+			}
+			if (changeDirection) {
+				currentState = TRAVELING;
+			}
+		}
+		else {
+			bool changeDirection = true;
+			if (shoulderX <= 0) {
+				shoulderX += .01;
+				changeDirection = false;
+			}
+			if (elbowX <= 0) {
+				elbowX += .01;
+				changeDirection = false;
+			}
+			if (wristX <= 0) {
+				wristX += .01;
+				changeDirection = false;
+			}
+			if (shoulderY <= 0) {
+				shoulderY += .01;
+				changeDirection = false;
+			}
+			if (changeDirection) {
+				currentState = TRAVELING;
+			}
+		}
+		break;
 	}
+
+	
+
 	track();
 	ride();
 	glutPostRedisplay();
