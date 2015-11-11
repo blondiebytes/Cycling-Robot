@@ -18,5 +18,13 @@
     <ClCompile Include="RobotRevolution.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="inverse.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="inverse.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

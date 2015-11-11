@@ -9,6 +9,8 @@
 #include <cfloat>
 #include <iostream>
 
+#include "inverse.h"
+
 using namespace std;
 
 // TO DO: 
@@ -32,6 +34,7 @@ using namespace std;
 #define ROBOT_ROTATION_STEP .01
 
 #define RSTEP     5.00
+#define WHEEL_RAD 0.3
 
 //Constants defining the step increments for changing
 //the location and the aim of the camera.
@@ -155,12 +158,40 @@ void drawCircle(GLdouble radius)
 	glEnd();
 }
 
+void drawWheel(GLdouble radius) {
+	GLdouble theta, delta;
+	delta = 2 * PI / ORBIT_SLICES;
+	glBegin(GL_LINE_LOOP);
+	for (theta = 0; theta < 2 * PI; theta += delta)
+		glVertex3f(radius*sin(theta), radius*cos(theta), 0.0);
+	glEnd();
+}
+
 // -- DRAWING TRACK --
 
 void drawTrack() { // Not showing up
 	glColor3f(0.0, 0.0, 1.0);
 	drawCircle(TRACK_RING);
 }
+
+void drawRightWheel() {
+	glPushMatrix();
+	glTranslatef(-.4, 0.1, -1.0);
+	glRotatef(90, 0, 1, 0);
+	glColor3f(1.0, 0.0, 0.0);
+	drawWheel(WHEEL_RAD);
+	glPopMatrix();
+}
+
+void drawLeftWheel() {
+	glPushMatrix();
+	glTranslatef(0.4, 0.1, -1.0);
+	glRotatef(90, 0, 1, 0);
+	glColor3f(1.0, 0.0, 0.0);
+	drawWheel(WHEEL_RAD);
+	glPopMatrix();
+}
+
 // -- DRAWING ROBOT ARM --
 
 void gotoShoulderCoordinates()
@@ -244,6 +275,8 @@ void drawRobot() { // Causes the program to crash
 	glPushMatrix();
 	goToRobot();
 	drawPlatform();
+	drawRightWheel();
+	drawLeftWheel();
 	drawRobotArm();
 	glPopMatrix();
 }
@@ -255,54 +288,71 @@ void goToBall() {
 	glRotatef((GLdouble)ballRevolution, 0.0, 0.0, 1.0);
 	// translate out to it
 	glTranslatef(TRACK_RING, 0.0, 0.0);
-	// SAVE in TOB Variable !!!
 }
 
+GLdouble TOH[16];
+GLdouble TOB[16];
+GLdouble THB[16];
+
+void computeTOH() {
+	glLoadIdentity();
+	glPushMatrix();
+	goToRobot();
+	gotoShoulderCoordinates();
+	gotoElbowCoordinates();
+	gotoWristCoordinates();
+	glGetDoublev(GL_MODELVIEW_MATRIX, TOH);
+	glPopMatrix();
+}
+
+void computeTOB() {
+	glLoadIdentity();
+	glPushMatrix();
+	goToBall();
+	glGetDoublev(GL_MODELVIEW_MATRIX, TOB);
+	glPopMatrix();
+}
 
 void computeTHB() {
-	glPushMatrix();
-	// 1. Set the model view matrix to the identity matrix
 	glLoadIdentity();
-	gotoWristCoordinates();
-	gotoElbowCoordinates();
-	gotoShoulderCoordinates();
-	// SAVE THB =  this.modelViewMatrix.muptiple(computeTHB ()); !!!
+	glPushMatrix();
+	glMatrixMode(GL_MODELVIEW);
+	GLdouble THO[16];
+	invertColumnMajor(TOH, THO);
+	glMultMatrixd(THO);
+	glMultMatrixd(TOB);
+	glGetDoublev(GL_MODELVIEW_MATRIX, THB);
 	glPopMatrix();
+}
 
+void updateTOB() {
+	glLoadIdentity();
+	glPushMatrix();
+	glMultMatrixd(TOH);
+	glMultMatrixd(THB);
+	glGetDoublev(GL_MODELVIEW_MATRIX, TOB);
+	glPopMatrix();
 }
 
 void drawBall() {
-	// SWITCH STATEMENT BASED ON STATE
-	switch (currentState) {
-	case TRAVELING: // use TOB to draw the ball in relation to the origin
-		goToBall(); // <-- computes TOB
-		glutSolidSphere(BALL_RADIUS, 10, 8);
-		break;
-	case REACHING: // compute THB and then mutiply the model view matrixd by TOB. Save it in THB
-		computeTHB();
-		// multiply by TOB
-		// save it into THB
-
-		// but for now...
-		goToBall();
-		glutSolidSphere(BALL_RADIUS, 10, 8);
-		break;
-	case CARRYING: // use THB to draw the ball in relation to the robot's hand
-		computeTHB();
-		// but for now..
-		//goToBall();
-		glutSolidSphere(BALL_RADIUS, 10, 8);
-		break;
-	case RETRACTING: break;
-		// load identity
-		// go from origin to hand
-		// multiply the model view matrix by Thb
-		// save it in TOB
-
-		// but for now...
-		goToBall();
+	glPushMatrix();
+	//glMultMatrixd(TOB);
+	if (currentState == CARRYING) {
+		goToRobot();
+		gotoShoulderCoordinates();
+		gotoElbowCoordinates();
+		gotoWristCoordinates();
+		glTranslated(0, 0, 1);
 		glutSolidSphere(BALL_RADIUS, 10, 8);
 	}
+	else {
+		
+		goToBall();
+		glutSolidSphere(BALL_RADIUS, 10, 8);
+		glPopMatrix();
+	}
+	glPopMatrix();
+	
 }
 
 // -- DRAWING EVERYTHING --
@@ -345,6 +395,7 @@ void display()
 		0.1, 200.0);
 	glMatrixMode(GL_MODELVIEW);
 
+
 	//Draw the picture
 	drawRobotOnTrack();
 
@@ -385,6 +436,8 @@ void homePosition() {
 
 	currentState = TRAVELING;
 	certainStepsAway = 0;
+
+	computeTOB();
 
 }
 
@@ -493,6 +546,7 @@ void timeStep() {
 				changeDirection = false;
 			}
 			if (changeDirection) {
+			//	computeTHB();
 				currentState = CARRYING;
 			}
 		}
@@ -515,6 +569,7 @@ void timeStep() {
 				changeDirection = false;
 			}
 			if (changeDirection) {
+			//	computeTHB();
 				currentState = CARRYING;
 			}
 		}
@@ -538,25 +593,24 @@ void timeStep() {
 				shoulderY += .01;
 				changeDirection = false;
 			}
-			// Move the ball as well
-			computeTHB();
+			//computeTOH();
+			//updateTOB();
 			if (changeDirection) {
-				// put down ball
-				ballRevolution = robotRevolution - (WITHIN_RANGE - 12);
+				ballRevolution = robotRevolution - (WITHIN_RANGE) + 15;
 				currentState = RETRACTING;
 			}
 		}
 		else {
 			bool changeDirection = true;
-			if (shoulderX >= -60) {
+			if (shoulderX >= -120) {
 				shoulderX -= .01;
 				changeDirection = false;
 			}
-			if (elbowX >= -60) {
+			if (elbowX >= -120) {
 				elbowX -= .01;
 				changeDirection = false;
 			}
-			if (wristX >= -60) {
+			if (wristX >= -120) {
 				wristX -= .01;
 				changeDirection = false;
 			}
@@ -564,10 +618,10 @@ void timeStep() {
 				shoulderY -= .01;
 				changeDirection = false;
 			}
+		//	computeTOH();
+		//	updateTOB();
 			if (changeDirection) {
-
-				// put down ball
-				ballRevolution = robotRevolution - (WITHIN_RANGE - 12);
+				ballRevolution = robotRevolution - (WITHIN_RANGE)+15;
 				currentState = RETRACTING;
 			}
 		}
