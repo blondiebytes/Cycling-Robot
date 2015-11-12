@@ -34,14 +34,14 @@ using namespace std;
 #define ROBOT_ROTATION_STEP .01
 
 #define RSTEP     5.00
-#define WHEEL_RAD 0.3
+#define WHEEL_RAD 0.35
 
 //Constants defining the step increments for changing
 //the location and the aim of the camera.
 #define EYE_STEP 0.1
 #define CEN_STEP 0.1
 #define ZOOM_FACTOR 8.0
-#define WITHIN_RANGE 40
+double WITHIN_RANGE = 40;
 
 //Enumerated type and global variable for keeping track
 //of the selected operation.
@@ -85,6 +85,7 @@ GLfloat shoulderZ = 0, elbowZ = 0, wristZ = 0;
 
 
 
+double wheelRotation = 0;
 double robotRevolution = 0;
 double ballRevolution = 180;
 bool alreadyPickedUpBall = false;
@@ -177,7 +178,10 @@ void drawTrack() { // Not showing up
 void drawRightWheel() {
 	glPushMatrix();
 	glTranslatef(-.4, 0.1, -1.0);
+	// Putting it into the right plane
 	glRotatef(90, 0, 1, 0);
+	// Moving the wheel with the robot
+	glRotatef(wheelRotation, 0, 0, 1);
 	glColor3f(1.0, 0.0, 0.0);
 	drawWheel(WHEEL_RAD);
 	glPopMatrix();
@@ -186,7 +190,10 @@ void drawRightWheel() {
 void drawLeftWheel() {
 	glPushMatrix();
 	glTranslatef(0.4, 0.1, -1.0);
+	// Putting it into the right plane
 	glRotatef(90, 0, 1, 0);
+	// Moving the wheel with the robot
+	glRotatef(wheelRotation, 0, 0, 1);
 	glColor3f(1.0, 0.0, 0.0);
 	drawWheel(WHEEL_RAD);
 	glPopMatrix();
@@ -266,9 +273,9 @@ void drawPlatform() {
 
 void goToRobot() {
 	// rotate to where the robot is on the track
-	glRotatef((GLdouble)robotRevolution, 0.0, 0.0, 1.0);
-	// translate out to it
-	glTranslatef(TRACK_RING, 0.0, 0.0);
+		glRotatef((GLdouble)robotRevolution, 0.0, 0.0, 1.0);
+		// translate out to it
+		glTranslatef(TRACK_RING, 0.0, 0.0);
 }
 
 void drawRobot() { // Causes the program to crash
@@ -344,9 +351,10 @@ void drawBall() {
 		gotoWristCoordinates();
 		glTranslated(0, 0, 1);
 		glutSolidSphere(BALL_RADIUS, 10, 8);
-	}
+	}//else// if (currentState == REACHING) {
+		//ballRevolution = 360 - robotRevolution 
+	//}
 	else {
-		
 		goToBall();
 		glutSolidSphere(BALL_RADIUS, 10, 8);
 		glPopMatrix();
@@ -428,6 +436,7 @@ void homePosition() {
 	// Setting up Robot
 	axisRobot = Z;
 	directionRobot = UP;
+	WITHIN_RANGE = 40;
 	joint = SHOULDER;
 	
 	shoulderX = 0; elbowX = 0; wristX = 0;
@@ -494,11 +503,12 @@ void track()
 	}
 }
 
-
+double readyToPickUp = -1000000000;
 
 void timeStep() {
 	switch (currentState) {
 	case TRAVELING:
+		wheelRotation++;
 		if (directionRobot == UP) {
 			if (abs(fmod(ballRevolution, 360.0) - fmod(robotRevolution,360.0)) <= WITHIN_RANGE && !alreadyPickedUpBall) {
 				currentState = REACHING;
@@ -513,20 +523,24 @@ void timeStep() {
 			}
 		}
 		else {
-			if (abs(fmod(ballRevolution, 360.0) + fmod(robotRevolution, 360.0)) <= WITHIN_RANGE && !alreadyPickedUpBall) {
+			//cout << "In range?" << readyToPickUp << endl;
+			if (((abs(fmod(ballRevolution, 360.0) + fmod(robotRevolution, 360.0)) <= WITHIN_RANGE) || readyToPickUp >= 32750 - (WITHIN_RANGE *100) + (5 * 100)) && !alreadyPickedUpBall ) {
 				currentState = REACHING;
 				certainStepsAway = 0;
+				readyToPickUp = -robotRevolution;
 			}
 			else {
-				if (certainStepsAway >= 2000) {
+				if (certainStepsAway >= 20000) {
 					alreadyPickedUpBall = false;
 				}
-				robotRevolution -= ROBOT_ROTATION_STEP;
+					robotRevolution -= ROBOT_ROTATION_STEP;
+					readyToPickUp++;
 				certainStepsAway++;
 			}
 		}
 		break;
 	case REACHING:
+		wheelRotation = 0;
 		if (directionRobot == UP) {
 			bool changeDirection = true;
 			if (shoulderX >= -45) {
@@ -549,23 +563,24 @@ void timeStep() {
 			//	computeTHB();
 				currentState = CARRYING;
 			}
+			
 		}
 		else {
 			bool changeDirection = true;
-			if (shoulderX <= 45) {
+			if (shoulderX <= 60) {
 				shoulderX += .01;
 				changeDirection = false;
 			}
-			if (elbowX <= 45) {
+			if (elbowX <= 60) {
 				elbowX += .01;
 				changeDirection = false;
 			}
-			if (wristX <= 45) {
+			if (wristX <= 60) {
 				wristX += .01;
 				changeDirection = false;
 			}
-			if (shoulderY <= 27) {
-				shoulderY += .01;
+			if (shoulderY <= -120) {
+				shoulderY -= .01;
 				changeDirection = false;
 			}
 			if (changeDirection) {
@@ -575,7 +590,7 @@ void timeStep() {
 		}
 		break;
 	case CARRYING:
-		if (directionRobot = UP) {
+		if (directionRobot == UP) {
 			bool changeDirection = true;
 			if (shoulderX <= 60) {
 				shoulderX += .01;
@@ -602,26 +617,27 @@ void timeStep() {
 		}
 		else {
 			bool changeDirection = true;
-			if (shoulderX >= -120) {
+			if (shoulderX >= -61) {
 				shoulderX -= .01;
 				changeDirection = false;
 			}
-			if (elbowX >= -120) {
+			if (elbowX >= -61) {
 				elbowX -= .01;
 				changeDirection = false;
 			}
-			if (wristX >= -120) {
+			if (wristX >= -61) {
 				wristX -= .01;
 				changeDirection = false;
 			}
-			if (shoulderY >= 0) {
-				shoulderY -= .01;
+			if (shoulderY <= 0) {
+				shoulderY += .01;
 				changeDirection = false;
 			}
 		//	computeTOH();
 		//	updateTOB();
 			if (changeDirection) {
-				ballRevolution = robotRevolution - (WITHIN_RANGE)+15;
+				ballRevolution = robotRevolution + WITHIN_RANGE;
+			//	cout << "Ball Rev" << ballRevolution << endl;
 				currentState = RETRACTING;
 			}
 		}
@@ -801,8 +817,8 @@ void animateSubMenu(int item)
 	glutIdleFunc(timeStep);
 	switch (item)
 	{
-	case 1: directionRobot = UP; break;
-	case 2: directionRobot = DOWN; break;
+	case 1: directionRobot = UP; WITHIN_RANGE = 40; break;
+	case 2: directionRobot = DOWN;  WITHIN_RANGE = 27; readyToPickUp = -1000000000; break;
 	}
 }
 
